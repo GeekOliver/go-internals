@@ -39,6 +39,7 @@ import (
 // To prevent IP spoofing, be sure to delete any pre-existing
 // X-Forwarded-For header coming from the client or
 // an untrusted proxy.
+//核心结构体
 type ReverseProxy struct {
 	// Director must be a function which modifies
 	// the request into a new request to be sent
@@ -46,10 +47,12 @@ type ReverseProxy struct {
 	// back to the original client unmodified.
 	// Director must not access the provided Request
 	// after returning.
+	//用于修改请求的函数
 	Director func(*http.Request)
 
 	// The transport used to perform proxy requests.
 	// If nil, http.DefaultTransport is used.
+	//连接池
 	Transport http.RoundTripper
 
 	// FlushInterval specifies the flush interval
@@ -62,6 +65,7 @@ type ReverseProxy struct {
 	// recognizes a response as a streaming response, or
 	// if its ContentLength is -1; for such responses, writes
 	// are flushed to the client immediately.
+	//用于刷新返回客户端的定时
 	FlushInterval time.Duration
 
 	// ErrorLog specifies an optional logger for errors
@@ -83,6 +87,7 @@ type ReverseProxy struct {
 	// If ModifyResponse returns an error, ErrorHandler is called
 	// with its error value. If ErrorHandler is nil, its default
 	// implementation is used.
+	//用于修改响应内容
 	ModifyResponse func(*http.Response) error
 
 	// ErrorHandler is an optional function that handles errors
@@ -90,6 +95,7 @@ type ReverseProxy struct {
 	//
 	// If nil, the default is to log the provided error and return
 	// a 502 Status Bad Gateway response.
+	//错误处理回调函数
 	ErrorHandler func(http.ResponseWriter, *http.Request, error)
 }
 
@@ -140,9 +146,13 @@ func joinURLPath(a, b *url.URL) (path, rawpath string) {
 // NewSingleHostReverseProxy does not rewrite the Host header.
 // To rewrite Host headers, use ReverseProxy directly with a custom
 // Director policy.
+//基础的转发
 func NewSingleHostReverseProxy(target *url.URL) *ReverseProxy {
 	targetQuery := target.RawQuery
 	director := func(req *http.Request) {
+		//scheme: 协议
+		//host : ip:port
+		//path: 路径
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.URL.Path, req.URL.RawPath = joinURLPath(target, req.URL)
@@ -198,6 +208,7 @@ func (p *ReverseProxy) getErrorHandler() func(http.ResponseWriter, *http.Request
 
 // modifyResponse conditionally runs the optional ModifyResponse hook
 // and reports whether the request should proceed.
+//用来修改响应的方法
 func (p *ReverseProxy) modifyResponse(rw http.ResponseWriter, res *http.Response, req *http.Request) bool {
 	if p.ModifyResponse == nil {
 		return true
@@ -210,13 +221,16 @@ func (p *ReverseProxy) modifyResponse(rw http.ResponseWriter, res *http.Response
 	return true
 }
 
+//实现了ServeHTTP
 func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	//获取连接，如果有连接池则不用默认的链接
 	transport := p.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-
+	//获取请求context，没有则创建一个
 	ctx := req.Context()
+	//1.查看是否取消请求，如果取消了则需要进行取消操作
 	if cn, ok := rw.(http.CloseNotifier); ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
@@ -230,8 +244,9 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			}
 		}()
 	}
-
+	//2.设置context信息,设置为对下游请求的内容
 	outreq := req.Clone(ctx)
+	//3.检查向下请求的outreq的ContentLength、body、header
 	if req.ContentLength == 0 {
 		outreq.Body = nil // Issue 16036: nil Body for http.Transport retries
 	}
@@ -247,10 +262,11 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if outreq.Header == nil {
 		outreq.Header = make(http.Header) // Issue 33142: historical behavior was to always allocate
 	}
-
+	//4.请求调用Director对outreq进行修改
 	p.Director(outreq)
 	outreq.Close = false
 
+	//5. upgrade头的特殊处理,并且清楚所有connection的头
 	reqUpType := upgradeType(outreq.Header)
 	if !ascii.IsPrint(reqUpType) {
 		p.getErrorHandler()(rw, req, fmt.Errorf("client tried to switch to invalid protocol %q", reqUpType))
@@ -261,6 +277,7 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// Remove hop-by-hop headers to the backend. Especially
 	// important is "Connection" because we want a persistent
 	// connection, regardless of what the client sent to us.
+	//删除后端的逐条标题，尤其重要的是连接。我们需要一个持久的连接，而不管客户端发送给我们什么。
 	for _, h := range hopHeaders {
 		outreq.Header.Del(h)
 	}
@@ -270,17 +287,19 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// advertise that unless the incoming client request thought it was worth
 	// mentioning.) Note that we look at req.Header, not outreq.Header, since
 	// the latter has passed through removeConnectionHeaders.
+	//当请求里面包含有te和trailers则对outreq写回
 	if httpguts.HeaderValuesContainsToken(req.Header["Te"], "trailers") {
 		outreq.Header.Set("Te", "trailers")
 	}
 
 	// After stripping all the hop-by-hop connection headers above, add back any
 	// necessary for protocol upgrades, such as for websockets.
+	//如果升级协议不为空，则需要设置为升级协议
 	if reqUpType != "" {
 		outreq.Header.Set("Connection", "Upgrade")
 		outreq.Header.Set("Upgrade", reqUpType)
 	}
-
+	//6. 追加X-Forwarded-For的clientIP信息
 	if clientIP, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
 		// If we aren't the first proxy retain prior
 		// X-Forwarded-For information as a comma+space
@@ -294,36 +313,43 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			outreq.Header.Set("X-Forwarded-For", clientIP)
 		}
 	}
-
+	//7. 向下游请求数据
 	res, err := transport.RoundTrip(outreq)
 	if err != nil {
 		p.getErrorHandler()(rw, outreq, err)
 		return
 	}
 
+	//8. 处理升级协议请求
 	// Deal with 101 Switching Protocols responses: (WebSocket, h2c, etc)
 	if res.StatusCode == http.StatusSwitchingProtocols {
 		if !p.modifyResponse(rw, res, outreq) {
 			return
 		}
+		//如果升级协议成功，则返回，不进行下一步操作
 		p.handleUpgradeResponse(rw, outreq, res)
 		return
 	}
-
+	//
+	//下面则是协议未升级需要继续处理的内容
+	//
+	//9. 移除响应逐段头部
 	removeConnectionHeaders(res.Header)
 
 	for _, h := range hopHeaders {
 		res.Header.Del(h)
 	}
 
+	//10. 修改返回内容
 	if !p.modifyResponse(rw, res, outreq) {
 		return
 	}
-
+	//11.拷贝头部数据
 	copyHeader(rw.Header(), res.Header)
 
 	// The "Trailer" header isn't included in the Transport's response,
 	// at least for *http.Transport. Build it up from Trailer.
+	//对Trailer头部进行处理
 	announcedTrailers := len(res.Trailer)
 	if announcedTrailers > 0 {
 		trailerKeys := make([]string, 0, len(res.Trailer))
@@ -332,9 +358,9 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}
 		rw.Header().Add("Trailer", strings.Join(trailerKeys, ", "))
 	}
-
+	//12. 写入状态码
 	rw.WriteHeader(res.StatusCode)
-
+	//13. 周期刷新内容到response
 	err = p.copyResponse(rw, res.Body, p.flushInterval(res))
 	if err != nil {
 		defer res.Body.Close()
@@ -348,7 +374,7 @@ func (p *ReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		panic(http.ErrAbortHandler)
 	}
 	res.Body.Close() // close now, instead of defer, to populate res.Trailer
-
+	//Trailer处理逻辑
 	if len(res.Trailer) > 0 {
 		// Force chunking if we saw a response trailer.
 		// This prevents net/http from calculating the length for short
@@ -594,7 +620,7 @@ func (p *ReverseProxy) handleUpgradeResponse(rw http.ResponseWriter, req *http.R
 	defer conn.Close()
 
 	copyHeader(rw.Header(), res.Header)
-
+	//只写入头部
 	res.Header = rw.Header()
 	res.Body = nil // so res.Write only writes the headers; we have res.Body in backConn above
 	if err := res.Write(brw); err != nil {
@@ -606,9 +632,10 @@ func (p *ReverseProxy) handleUpgradeResponse(rw http.ResponseWriter, req *http.R
 		return
 	}
 	errc := make(chan error, 1)
+	//交换协议，一直维持互相拷贝状态，直到一方报错
 	spc := switchProtocolCopier{user: conn, backend: backConn}
-	go spc.copyToBackend(errc)
-	go spc.copyFromBackend(errc)
+	go spc.copyToBackend(errc)   //从客户端读取数据向下游传递
+	go spc.copyFromBackend(errc) //从下游读取数据向客户端传递
 	<-errc
 	return
 }

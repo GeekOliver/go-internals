@@ -1,0 +1,16 @@
+api
+bin
+doc
+lib
+misc
+pkg
+test
+AUTHORS
+codereview.cfg
+CONTRIBUTING.md
+CONTRIBUTORS
+LICENSE
+PATENTS
+SECURITY.md
+VERSION
+.idea

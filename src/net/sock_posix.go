@@ -14,9 +14,11 @@ import (
 	"syscall"
 )
 
+//socket创建、绑定地址、监听端口
 // socket returns a network file descriptor that is ready for
 // asynchronous I/O using the network poller.
 func socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr sockaddr, ctrlFn func(string, string, syscall.RawConn) error) (fd *netFD, err error) {
+	//调用系统创建的socket
 	s, err := sysSocket(family, sotype, proto)
 	if err != nil {
 		return nil, err
@@ -25,6 +27,7 @@ func socket(ctx context.Context, net string, family, sotype, proto int, ipv6only
 		poll.CloseFunc(s)
 		return nil, err
 	}
+	//创建网络描述符，完成netFD结构的填充
 	if fd, err = newFD(s, family, sotype, net); err != nil {
 		poll.CloseFunc(s)
 		return nil, err
@@ -54,12 +57,14 @@ func socket(ctx context.Context, net string, family, sotype, proto int, ipv6only
 
 	if laddr != nil && raddr == nil {
 		switch sotype {
+		//对于tcp来说
 		case syscall.SOCK_STREAM, syscall.SOCK_SEQPACKET:
 			if err := fd.listenStream(laddr, listenerBacklog(), ctrlFn); err != nil {
 				fd.Close()
 				return nil, err
 			}
 			return fd, nil
+		//对于UDP的处理
 		case syscall.SOCK_DGRAM:
 			if err := fd.listenDatagram(laddr, ctrlFn); err != nil {
 				fd.Close()

@@ -365,6 +365,7 @@ var (
 	colonSpace = []byte(": ")
 )
 
+//将响应写入到response中
 func (cw *chunkWriter) Write(p []byte) (n int, err error) {
 	if !cw.wroteHeader {
 		cw.writeHeader(p)
@@ -1853,6 +1854,7 @@ func (c *conn) serve(ctx context.Context) {
 	c.bufw = newBufioWriterSize(checkConnErrorWriter{c}, 4<<10)
 
 	for {
+		//循环读取用户请求
 		w, err := c.readRequest(ctx)
 		if c.r.remain != c.server.initialReadLimitSize() {
 			// If we read any bytes off the wire, we're active.
@@ -2240,7 +2242,7 @@ type muxEntry struct {
 	pattern string
 }
 
-// NewServeMux allocates and returns a new ServeMux.
+// NewServeMux 多路复用 allocates and returns a new ServeMux.
 func NewServeMux() *ServeMux { return new(ServeMux) }
 
 // DefaultServeMux is the default ServeMux used by Serve.
@@ -2875,7 +2877,7 @@ func (sh serverHandler) ServeHTTP(rw ResponseWriter, req *Request) {
 			}
 		}()
 	}
-
+	//处理正儿八经的http请求
 	handler.ServeHTTP(rw, req)
 }
 
@@ -2916,6 +2918,7 @@ func AllowQuerySemicolons(h Handler) Handler {
 //
 // ListenAndServe always returns a non-nil error. After Shutdown or Close,
 // the returned error is ErrServerClosed.
+//监听一个端口，建立tcp服务器，这样就可以处理http了
 func (srv *Server) ListenAndServe() error {
 	if srv.shuttingDown() {
 		return ErrServerClosed
@@ -2924,10 +2927,12 @@ func (srv *Server) ListenAndServe() error {
 	if addr == "" {
 		addr = ":http"
 	}
+	//tcp协议搭建服务，http的listen
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+	//端口监听
 	return srv.Serve(ln)
 }
 
@@ -2969,6 +2974,7 @@ var ErrServerClosed = errors.New("http: Server closed")
 //
 // Serve always returns a non-nil error and closes l.
 // After Shutdown or Close, the returned error is ErrServerClosed.
+//监听客户端的请求
 func (srv *Server) Serve(l net.Listener) error {
 	if fn := testHookServerServe; fn != nil {
 		fn(srv, l) // call hook with unwrapped listener
@@ -2999,6 +3005,8 @@ func (srv *Server) Serve(l net.Listener) error {
 
 	ctx := context.WithValue(baseCtx, ServerContextKey, srv)
 	for {
+		//接收客户端请求 rw客户请求的信息
+		//accept从established状态的链接队列头部取出一个已经完成连接
 		rw, err := l.Accept()
 		if err != nil {
 			select {
@@ -3006,6 +3014,7 @@ func (srv *Server) Serve(l net.Listener) error {
 				return ErrServerClosed
 			default:
 			}
+			//如果有网络错误，则延时等待
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
 				if tempDelay == 0 {
 					tempDelay = 5 * time.Millisecond
@@ -3029,8 +3038,10 @@ func (srv *Server) Serve(l net.Listener) error {
 			}
 		}
 		tempDelay = 0
+		//创建一个新的连接
 		c := srv.newConn(rw)
 		c.setState(c.rwc, StateNew, runHooks) // before Serve can return
+		//创建一个新的协程去处理客户端请求
 		go c.serve(connCtx)
 	}
 }

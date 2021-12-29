@@ -3,12 +3,11 @@
 
 ## done
 
-
++ [net/http/httputil/reverseproxy.go](src/net/http/httputil/reverseproxy.go)
 
 ## doing
 
-+ [net](src/net)
-  + [net/http/httputil/reverseproxy.go](src/net/http/httputil/reverseproxy.go) 分析中
++ [net](src/net) 分析中
 
 ## todo
 

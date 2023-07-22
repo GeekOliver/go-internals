@@ -3,7 +3,6 @@
 // license that can be found in the LICENSE file.
 
 //go:build dragonfly || freebsd || linux || netbsd || openbsd || solaris
-// +build dragonfly freebsd linux netbsd openbsd solaris
 
 package x509
 
@@ -150,7 +149,7 @@ func TestLoadSystemCertsLoadColonSeparatedDirs(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	rootPEMs := []string{
-		geoTrustRoot,
+		gtsRoot,
 		googleLeaf,
 		startComRoot,
 	}

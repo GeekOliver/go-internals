@@ -58,20 +58,28 @@ TEXT runtime·sigfwd(SB),NOSPLIT,$0-32
 	RET
 
 // Called using C ABI.
-TEXT runtime·sigtramp<ABIInternal>(SB),NOSPLIT,$0
+TEXT runtime·sigtramp(SB),NOSPLIT|TOPFRAME,$0
 	// Transition from C ABI to Go ABI.
 	PUSH_REGS_HOST_TO_ABI0()
 
-	// Call into the Go signal handler
+	// Set up ABIInternal environment: g in R14, cleared X15.
+	get_tls(R12)
+	MOVQ	g(R12), R14
+	PXOR	X15, X15
+
+	// Reserve space for spill slots.
 	NOP	SP		// disable vet stack checking
-        ADJSP   $24
-	MOVQ	DI, 0(SP)	// sig
-	MOVQ	SI, 8(SP)	// info
-	MOVQ	DX, 16(SP)	// ctx
-	CALL	·sigtrampgo(SB)
+	ADJSP   $24
+
+	// Call into the Go signal handler
+	MOVQ	DI, AX	// sig
+	MOVQ	SI, BX	// info
+	MOVQ	DX, CX	// ctx
+	CALL	·sigtrampgo<ABIInternal>(SB)
+
 	ADJSP	$-24
 
-        POP_REGS_HOST_TO_ABI0()
+	POP_REGS_HOST_TO_ABI0()
 	RET
 
 //
@@ -369,19 +377,32 @@ TEXT runtime·clock_gettime_trampoline(SB),NOSPLIT,$0
 	MOVL	0(DI), DI		// arg 1 clock_id
 	CALL	libc_clock_gettime(SB)
 	TESTL	AX, AX
-	JEQ	2(PC)
-	MOVL	$0xf1, 0xf1  // crash
+	JEQ	noerr
+	CALL	libc_errno(SB)
+	MOVL	(AX), AX		// errno
+	NEGL	AX			// caller expects negative errno value
+noerr:
 	POPQ	BP
 	RET
 
 TEXT runtime·fcntl_trampoline(SB),NOSPLIT,$0
 	PUSHQ	BP
 	MOVQ	SP, BP
-	MOVL	4(DI), SI		// arg 2 cmd
-	MOVL	8(DI), DX		// arg 3 arg
-	MOVL	0(DI), DI		// arg 1 fd
+	MOVQ	DI, BX
+	MOVL	0(BX), DI		// arg 1 fd
+	MOVL	4(BX), SI		// arg 2 cmd
+	MOVL	8(BX), DX		// arg 3 arg
 	XORL	AX, AX			// vararg: say "no float args"
 	CALL	libc_fcntl(SB)
+	XORL	DX, DX
+	CMPL	AX, $-1
+	JNE	noerr
+	CALL	libc_errno(SB)
+	MOVL	(AX), DX
+	MOVL	$-1, AX
+noerr:
+	MOVL	AX, 12(BX)
+	MOVL	DX, 16(BX)
 	POPQ	BP
 	RET
 
@@ -762,4 +783,10 @@ ok:
 	XORL	AX, AX        // no error (it's ignored anyway)
 	MOVQ	BP, SP
 	POPQ	BP
+	RET
+
+TEXT runtime·issetugid_trampoline(SB),NOSPLIT,$0
+	MOVQ	DI, BX			// BX is caller-save
+	CALL	libc_issetugid(SB)
+	MOVL	AX, 0(BX)		// return value
 	RET

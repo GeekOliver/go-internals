@@ -5,7 +5,6 @@
 package template
 
 import (
-	"bytes"
 	"math"
 	"strings"
 	"testing"
@@ -81,14 +80,17 @@ func TestNextJsCtx(t *testing.T) {
 		{jsCtxDivOp, "0"},
 		// Dots that are part of a number are div preceders.
 		{jsCtxDivOp, "0."},
+		// Some JS interpreters treat NBSP as a normal space, so
+		// we must too in order to properly escape things.
+		{jsCtxRegexp, "=\u00A0"},
 	}
 
 	for _, test := range tests {
-		if nextJSCtx([]byte(test.s), jsCtxRegexp) != test.jsCtx {
-			t.Errorf("want %s got %q", test.jsCtx, test.s)
+		if ctx := nextJSCtx([]byte(test.s), jsCtxRegexp); ctx != test.jsCtx {
+			t.Errorf("%q: want %s got %s", test.s, test.jsCtx, ctx)
 		}
-		if nextJSCtx([]byte(test.s), jsCtxDivOp) != test.jsCtx {
-			t.Errorf("want %s got %q", test.jsCtx, test.s)
+		if ctx := nextJSCtx([]byte(test.s), jsCtxDivOp); ctx != test.jsCtx {
+			t.Errorf("%q: want %s got %s", test.s, test.jsCtx, ctx)
 		}
 	}
 
@@ -103,7 +105,7 @@ func TestNextJsCtx(t *testing.T) {
 
 func TestJSValEscaper(t *testing.T) {
 	tests := []struct {
-		x  interface{}
+		x  any
 		js string
 	}{
 		{int(42), " 42 "},
@@ -140,8 +142,8 @@ func TestJSValEscaper(t *testing.T) {
 		// "\v" == "v" on IE 6 so use "\u000b" instead.
 		{"\t\x0b", `"\t\u000b"`},
 		{struct{ X, Y int }{1, 2}, `{"X":1,"Y":2}`},
-		{[]interface{}{}, "[]"},
-		{[]interface{}{42, "foo", nil}, `[42,"foo",null]`},
+		{[]any{}, "[]"},
+		{[]any{42, "foo", nil}, `[42,"foo",null]`},
 		{[]string{"<!--", "</script>", "-->"}, `["\u003c!--","\u003c/script\u003e","--\u003e"]`},
 		{"<!--", `"\u003c!--"`},
 		{"-->", `"--\u003e"`},
@@ -158,7 +160,7 @@ func TestJSValEscaper(t *testing.T) {
 		}
 		// Make sure that escaping corner cases are not broken
 		// by nesting.
-		a := []interface{}{test.x}
+		a := []any{test.x}
 		want := "[" + strings.TrimSpace(test.js) + "]"
 		if js := jsValEscaper(a); js != want {
 			t.Errorf("%+v: want\n\t%q\ngot\n\t%q", a, want, js)
@@ -168,7 +170,7 @@ func TestJSValEscaper(t *testing.T) {
 
 func TestJSStrEscaper(t *testing.T) {
 	tests := []struct {
-		x   interface{}
+		x   any
 		esc string
 	}{
 		{"", ``},
@@ -223,7 +225,7 @@ func TestJSStrEscaper(t *testing.T) {
 
 func TestJSRegexpEscaper(t *testing.T) {
 	tests := []struct {
-		x   interface{}
+		x   any
 		esc string
 	}{
 		{"", `(?:)`},
@@ -278,7 +280,7 @@ func TestEscapersOnLower7AndSelectHighCodepoints(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		escaper func(...interface{}) string
+		escaper func(...any) string
 		escaped string
 	}{
 		{
@@ -292,7 +294,7 @@ func TestEscapersOnLower7AndSelectHighCodepoints(t *testing.T) {
 				`0123456789:;\u003c=\u003e?` +
 				`@ABCDEFGHIJKLMNO` +
 				`PQRSTUVWXYZ[\\]^_` +
-				"`abcdefghijklmno" +
+				"\\u0060abcdefghijklmno" +
 				"pqrstuvwxyz{|}~\u007f" +
 				"\u00A0\u0100\\u2028\\u2029\ufeff\U0001D11E",
 		},
@@ -321,7 +323,7 @@ func TestEscapersOnLower7AndSelectHighCodepoints(t *testing.T) {
 
 		// Escape it rune by rune to make sure that any
 		// fast-path checking does not break escaping.
-		var buf bytes.Buffer
+		var buf strings.Builder
 		for _, c := range input {
 			buf.WriteString(test.escaper(string(c)))
 		}

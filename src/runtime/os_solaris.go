@@ -149,7 +149,7 @@ func sysvicall3(fn *libcFunc, a1, a2, a3 uintptr) uintptr {
 //go:cgo_unsafe_args
 
 // sysvicall3Err returns both the system call result and the errno value.
-// This is used by sysicall3 and write1.
+// This is used by sysvicall3 and write1.
 func sysvicall3Err(fn *libcFunc, a1, a2, a3 uintptr) (r1, err uintptr) {
 	// Leave caller's PC/SP around for traceback.
 	gp := getg()
@@ -179,6 +179,7 @@ func sysvicall3Err(fn *libcFunc, a1, a2, a3 uintptr) (r1, err uintptr) {
 }
 
 //go:nosplit
+//go:cgo_unsafe_args
 func sysvicall4(fn *libcFunc, a1, a2, a3, a4 uintptr) uintptr {
 	// Leave caller's PC/SP around for traceback.
 	gp := getg()
@@ -208,6 +209,7 @@ func sysvicall4(fn *libcFunc, a1, a2, a3, a4 uintptr) uintptr {
 }
 
 //go:nosplit
+//go:cgo_unsafe_args
 func sysvicall5(fn *libcFunc, a1, a2, a3, a4, a5 uintptr) uintptr {
 	// Leave caller's PC/SP around for traceback.
 	gp := getg()
@@ -237,6 +239,7 @@ func sysvicall5(fn *libcFunc, a1, a2, a3, a4, a5 uintptr) uintptr {
 }
 
 //go:nosplit
+//go:cgo_unsafe_args
 func sysvicall6(fn *libcFunc, a1, a2, a3, a4, a5, a6 uintptr) uintptr {
 	// Leave caller's PC/SP around for traceback.
 	gp := getg()
@@ -263,4 +266,8 @@ func sysvicall6(fn *libcFunc, a1, a2, a3, a4, a5, a6 uintptr) uintptr {
 		mp.libcallsp = 0
 	}
 	return libcall.r1
+}
+
+func issetugid() int32 {
+	return int32(sysvicall0(&libc_issetugid))
 }

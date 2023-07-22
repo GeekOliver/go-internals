@@ -13,6 +13,11 @@ import (
 	"unicode/utf8"
 )
 
+// jsWhitespace contains all of the JS whitespace characters, as defined
+// by the \s character class.
+// See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions/Character_classes.
+const jsWhitespace = "\f\n\r\t\v\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
 // nextJSCtx returns the context that determines whether a slash after the
 // given run of tokens starts a regular expression instead of a division
 // operator: / or /=.
@@ -26,7 +31,8 @@ import (
 // JavaScript 2.0 lexical grammar and requires one token of lookbehind:
 // https://www.mozilla.org/js/language/js20-2000-07/rationale/syntax.html
 func nextJSCtx(s []byte, preceding jsCtx) jsCtx {
-	s = bytes.TrimRight(s, "\t\n\f\r \u2028\u2029")
+	// Trim all JS whitespace characters
+	s = bytes.TrimRight(s, jsWhitespace)
 	if len(s) == 0 {
 		return preceding
 	}
@@ -122,7 +128,7 @@ var jsonMarshalType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 
 // indirectToJSONMarshaler returns the value, after dereferencing as many times
 // as necessary to reach the base type (or nil) or an implementation of json.Marshal.
-func indirectToJSONMarshaler(a interface{}) interface{} {
+func indirectToJSONMarshaler(a any) any {
 	// text/template now supports passing untyped nil as a func call
 	// argument, so we must support it. Otherwise we'd panic below, as one
 	// cannot call the Type or Interface methods on an invalid
@@ -132,7 +138,7 @@ func indirectToJSONMarshaler(a interface{}) interface{} {
 	}
 
 	v := reflect.ValueOf(a)
-	for !v.Type().Implements(jsonMarshalType) && v.Kind() == reflect.Ptr && !v.IsNil() {
+	for !v.Type().Implements(jsonMarshalType) && v.Kind() == reflect.Pointer && !v.IsNil() {
 		v = v.Elem()
 	}
 	return v.Interface()
@@ -140,8 +146,8 @@ func indirectToJSONMarshaler(a interface{}) interface{} {
 
 // jsValEscaper escapes its inputs to a JS Expression (section 11.14) that has
 // neither side-effects nor free variables outside (NaN, Infinity).
-func jsValEscaper(args ...interface{}) string {
-	var a interface{}
+func jsValEscaper(args ...any) string {
+	var a any
 	if len(args) == 1 {
 		a = indirectToJSONMarshaler(args[0])
 		switch t := a.(type) {
@@ -224,7 +230,7 @@ func jsValEscaper(args ...interface{}) string {
 // jsStrEscaper produces a string that can be included between quotes in
 // JavaScript source, in JavaScript embedded in an HTML5 <script> element,
 // or in an HTML5 event handler attribute such as onclick.
-func jsStrEscaper(args ...interface{}) string {
+func jsStrEscaper(args ...any) string {
 	s, t := stringify(args...)
 	if t == contentTypeJSStr {
 		return replace(s, jsStrNormReplacementTable)
@@ -236,7 +242,7 @@ func jsStrEscaper(args ...interface{}) string {
 // specials so the result is treated literally when included in a regular
 // expression literal. /foo{{.X}}bar/ matches the string "foo" followed by
 // the literal text of {{.X}} followed by the string "bar".
-func jsRegexpEscaper(args ...interface{}) string {
+func jsRegexpEscaper(args ...any) string {
 	s, _ := stringify(args...)
 	s = replace(s, jsRegexpReplacementTable)
 	if s == "" {
@@ -308,6 +314,7 @@ var jsStrReplacementTable = []string{
 	// Encode HTML specials as hex so the output can be embedded
 	// in HTML attributes without further encoding.
 	'"':  `\u0022`,
+	'`':  `\u0060`,
 	'&':  `\u0026`,
 	'\'': `\u0027`,
 	'+':  `\u002b`,
@@ -331,6 +338,7 @@ var jsStrNormReplacementTable = []string{
 	'"':  `\u0022`,
 	'&':  `\u0026`,
 	'\'': `\u0027`,
+	'`':  `\u0060`,
 	'+':  `\u002b`,
 	'/':  `\/`,
 	'<':  `\u003c`,
@@ -398,9 +406,7 @@ func isJSType(mimeType string) bool {
 	//   https://tools.ietf.org/html/rfc4329#section-3
 	//   https://www.ietf.org/rfc/rfc4627.txt
 	// discard parameters
-	if i := strings.Index(mimeType, ";"); i >= 0 {
-		mimeType = mimeType[:i]
-	}
+	mimeType, _, _ = strings.Cut(mimeType, ";")
 	mimeType = strings.ToLower(mimeType)
 	mimeType = strings.TrimSpace(mimeType)
 	switch mimeType {

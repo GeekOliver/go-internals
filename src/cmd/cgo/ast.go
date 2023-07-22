@@ -52,8 +52,8 @@ func (f *File) ParseGo(abspath string, src []byte) {
 	// and reprinting.
 	// In cgo mode, we ignore ast2 and just apply edits directly
 	// the text behind ast1. In godefs mode we modify and print ast2.
-	ast1 := parse(abspath, src, parser.ParseComments)
-	ast2 := parse(abspath, src, 0)
+	ast1 := parse(abspath, src, parser.SkipObjectResolution|parser.ParseComments)
+	ast2 := parse(abspath, src, parser.SkipObjectResolution)
 
 	f.Package = ast1.Name.Name
 	f.Name = make(map[string]*Name)
@@ -80,6 +80,11 @@ func (f *File) ParseGo(abspath string, src []byte) {
 				cg = d.Doc
 			}
 			if cg != nil {
+				if strings.ContainsAny(abspath, "\r\n") {
+					// This should have been checked when the file path was first resolved,
+					// but we double check here just to be sure.
+					fatalf("internal error: ParseGo: abspath contains unexpected newline character: %q", abspath)
+				}
 				f.Preamble += fmt.Sprintf("#line %d %q\n", sourceLine(cg), abspath)
 				f.Preamble += commentText(cg) + "\n"
 				f.Preamble += "#line 1 \"cgo-generated-wrapper\"\n"
@@ -338,8 +343,7 @@ func (f *File) walk(x interface{}, context astContext, visit func(*File, interfa
 
 	// everything else just recurs
 	default:
-		error_(token.NoPos, "unexpected type %T in walk", x)
-		panic("unexpected type")
+		f.walkUnexpected(x, context, visit)
 
 	case nil:
 
@@ -410,6 +414,9 @@ func (f *File) walk(x interface{}, context astContext, visit func(*File, interfa
 	case *ast.StructType:
 		f.walk(n.Fields, ctxField, visit)
 	case *ast.FuncType:
+		if tparams := funcTypeTypeParams(n); tparams != nil {
+			f.walk(tparams, ctxParam, visit)
+		}
 		f.walk(n.Params, ctxParam, visit)
 		if n.Results != nil {
 			f.walk(n.Results, ctxParam, visit)
@@ -497,6 +504,9 @@ func (f *File) walk(x interface{}, context astContext, visit func(*File, interfa
 			f.walk(n.Values, ctxExpr, visit)
 		}
 	case *ast.TypeSpec:
+		if tparams := typeSpecTypeParams(n); tparams != nil {
+			f.walk(tparams, ctxParam, visit)
+		}
 		f.walk(&n.Type, ctxType, visit)
 
 	case *ast.BadDecl:

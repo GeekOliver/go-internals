@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/scanner"
 	"go/token"
 	"io"
 	"strconv"
@@ -240,6 +241,27 @@ func (r *importReader) findEmbed(first bool) bool {
 				}
 			}
 
+		case '\'':
+			startLine = false
+			for r.err == nil {
+				if r.eof {
+					r.syntaxError()
+				}
+				c = r.readByteNoBuf()
+				if c == '\\' {
+					r.readByteNoBuf()
+					if r.err != nil {
+						r.syntaxError()
+						return false
+					}
+					continue
+				}
+				if c == '\'' {
+					c = r.readByteNoBuf()
+					goto Reswitch
+				}
+			}
+
 		case '/':
 			c = r.readByteNoBuf()
 			switch c {
@@ -369,7 +391,7 @@ func readComments(f io.Reader) ([]byte, error) {
 // readGoInfo expects a Go file as input and reads the file up to and including the import section.
 // It records what it learned in *info.
 // If info.fset is non-nil, readGoInfo parses the file and sets info.parsed, info.parseErr,
-// info.imports, info.embeds, and info.embedErr.
+// info.imports and info.embeds.
 //
 // It only returns an error if there are problems reading the file,
 // not for syntax errors in the file itself.
@@ -438,6 +460,13 @@ func readGoInfo(f io.Reader, info *fileInfo) error {
 			if err != nil {
 				return fmt.Errorf("parser returned invalid quoted string: <%s>", quoted)
 			}
+			if !isValidImport(path) {
+				// The parser used to return a parse error for invalid import paths, but
+				// no longer does, so check for and create the error here instead.
+				info.parseErr = scanner.Error{Pos: info.fset.Position(spec.Pos()), Msg: "invalid import path: " + path}
+				info.imports = nil
+				return nil
+			}
 			if path == "embed" {
 				hasEmbed = true
 			}
@@ -483,6 +512,20 @@ func readGoInfo(f io.Reader, info *fileInfo) error {
 	return nil
 }
 
+// isValidImport checks if the import is a valid import using the more strict
+// checks allowed by the implementation restriction in https://go.dev/ref/spec#Import_declarations.
+// It was ported from the function of the same name that was removed from the
+// parser in CL 424855, when the parser stopped doing these checks.
+func isValidImport(s string) bool {
+	const illegalChars = `!"#$%&'()*,:;<=>?[\]^{|}` + "`\uFFFD"
+	for _, r := range s {
+		if !unicode.IsGraphic(r) || unicode.IsSpace(r) || strings.ContainsRune(illegalChars, r) {
+			return false
+		}
+	}
+	return s != ""
+}
+
 // parseGoEmbed parses the text following "//go:embed" to extract the glob patterns.
 // It accepts unquoted space-separated patterns as well as double-quoted and back-quoted Go strings.
 // This is based on a similar function in cmd/compile/internal/gc/noder.go;
@@ -516,12 +559,12 @@ func parseGoEmbed(args string, pos token.Position) ([]fileEmbed, error) {
 			trimBytes(i)
 
 		case '`':
-			i := strings.Index(args[1:], "`")
-			if i < 0 {
+			var ok bool
+			path, _, ok = strings.Cut(args[1:], "`")
+			if !ok {
 				return nil, fmt.Errorf("invalid quoted string in //go:embed: %s", args)
 			}
-			path = args[1 : 1+i]
-			trimBytes(1 + i + 1)
+			trimBytes(1 + len(path) + 1)
 
 		case '"':
 			i := 1

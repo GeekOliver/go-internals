@@ -10,7 +10,7 @@
 // Note: For system ABI, R0-R3 are args, R4-R11 are callee-save.
 
 // void runtime·asmstdcall(void *c);
-TEXT runtime·asmstdcall<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+TEXT runtime·asmstdcall(SB),NOSPLIT|NOFRAME,$0
 	MOVM.DB.W [R4, R5, R14], (R13)	// push {r4, r5, lr}
 	MOVW	R0, R4			// put libcall * in r4
 	MOVW	R13, R5			// save stack pointer in r5
@@ -123,8 +123,14 @@ TEXT sigtramp<>(SB),NOSPLIT|NOFRAME,$0
 	MOVW	R1, R7			// Save param1
 
 	BL      runtime·load_g(SB)
-	CMP	$0, g			// is there a current g?
-	BL.EQ	runtime·badsignal2(SB)
+	CMP	$0,	g		// is there a current g?
+	BNE	g_ok
+	ADD	$(8+20), R13	// free locals
+	MOVM.IA.W (R13), [R3, R4-R11, R14]	// pop {r3, r4-r11, lr}
+	MOVW	$0, R0		// continue 
+	BEQ	return
+
+g_ok:
 
 	// save g and SP in case of stack switch
 	MOVW	R13, 24(R13)
@@ -222,21 +228,21 @@ TEXT sigresume<>(SB),NOSPLIT|NOFRAME,$0
 	MOVW	R0, R13
 	B	(R1)
 
-TEXT runtime·exceptiontramp<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+TEXT runtime·exceptiontramp(SB),NOSPLIT|NOFRAME,$0
 	MOVW	$runtime·exceptionhandler(SB), R1
 	B	sigtramp<>(SB)
 
-TEXT runtime·firstcontinuetramp<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+TEXT runtime·firstcontinuetramp(SB),NOSPLIT|NOFRAME,$0
 	MOVW	$runtime·firstcontinuehandler(SB), R1
 	B	sigtramp<>(SB)
 
-TEXT runtime·lastcontinuetramp<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+TEXT runtime·lastcontinuetramp(SB),NOSPLIT|NOFRAME,$0
 	MOVW	$runtime·lastcontinuehandler(SB), R1
 	B	sigtramp<>(SB)
 
 GLOBL runtime·cbctxts(SB), NOPTR, $4
 
-TEXT runtime·callbackasm1<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+TEXT runtime·callbackasm1(SB),NOSPLIT|NOFRAME,$0
 	// On entry, the trampoline in zcallback_windows_arm.s left
 	// the callback index in R12 (which is volatile in the C ABI).
 
@@ -275,7 +281,7 @@ TEXT runtime·callbackasm1<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	B	(R12)	// return
 
 // uint32 tstart_stdcall(M *newm);
-TEXT runtime·tstart_stdcall<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+TEXT runtime·tstart_stdcall(SB),NOSPLIT|NOFRAME,$0
 	MOVM.DB.W [R4-R11, R14], (R13)		// push {r4-r11, lr}
 
 	MOVW	m_g0(R0), g
@@ -319,7 +325,7 @@ TEXT runtime·usleep2(SB),NOSPLIT|NOFRAME,$0-4
 // Runs on OS stack.
 // duration (in -100ns units) is in dt+0(FP).
 // g is valid.
-// TODO: neeeds to be implemented properly.
+// TODO: needs to be implemented properly.
 TEXT runtime·usleep2HighRes(SB),NOSPLIT|NOFRAME,$0-4
 	B	runtime·abort(SB)
 
